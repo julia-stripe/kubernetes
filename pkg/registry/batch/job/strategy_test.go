@@ -36,15 +36,7 @@ func newBool(a bool) *bool {
 	return r
 }
 
-func TestJobStrategy(t *testing.T) {
-	ctx := genericapirequest.NewDefaultContext()
-	if !Strategy.NamespaceScoped() {
-		t.Errorf("Job must be namespace scoped")
-	}
-	if Strategy.AllowCreateOnUpdate() {
-		t.Errorf("Job should not allow create on update")
-	}
-
+func baseJob() *batch.Job {
 	validSelector := &metav1.LabelSelector{
 		MatchLabels: map[string]string{"a": "b"},
 	}
@@ -58,7 +50,7 @@ func TestJobStrategy(t *testing.T) {
 			Containers:    []api.Container{{Name: "abc", Image: "image", ImagePullPolicy: "IfNotPresent", TerminationMessagePolicy: api.TerminationMessageReadFile}},
 		},
 	}
-	job := &batch.Job{
+	return &batch.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "myjob",
 			Namespace: metav1.NamespaceDefault,
@@ -72,6 +64,43 @@ func TestJobStrategy(t *testing.T) {
 			Active: 11,
 		},
 	}
+}
+
+func TestJobInitContainers(t *testing.T) {
+	ctx := genericapirequest.NewDefaultContext()
+	job := baseJob()
+	job.Spec.Template.Spec.InitContainers = []api.Container{{Name: "init-container", Image: "image", ImagePullPolicy: "IfNotPresent", TerminationMessagePolicy: api.TerminationMessageReadFile}}
+	updatedJob := baseJob()
+	updatedJob.Spec.Template.Spec.InitContainers = []api.Container{{Name: "updated-init-container", Image: "image", ImagePullPolicy: "IfNotPresent", TerminationMessagePolicy: api.TerminationMessageReadFile}}
+	updatedJob.ObjectMeta.ResourceVersion = "4"
+
+	Strategy.PrepareForCreate(ctx, job)
+	if job.Status.Active != 0 {
+		t.Errorf("Job does not allow setting status on create")
+	}
+	errs := Strategy.Validate(ctx, job)
+	if len(errs) != 0 {
+		t.Errorf("Unexpected error validating %v", errs)
+	}
+
+	Strategy.PrepareForUpdate(ctx, updatedJob, job)
+
+	errs = Strategy.ValidateUpdate(ctx, updatedJob, job)
+	if len(errs) == 0 {
+		t.Errorf("Expected a validation error: should not allow modifying init container")
+	}
+}
+
+func TestJobStrategy(t *testing.T) {
+	ctx := genericapirequest.NewDefaultContext()
+	if !Strategy.NamespaceScoped() {
+		t.Errorf("Job must be namespace scoped")
+	}
+	if Strategy.AllowCreateOnUpdate() {
+		t.Errorf("Job should not allow create on update")
+	}
+
+	job := baseJob()
 
 	Strategy.PrepareForCreate(ctx, job)
 	if job.Status.Active != 0 {
